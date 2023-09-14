@@ -1,0 +1,8 @@
+run those lines in conda terminal
+'''
+conda install pytorch torchvision torchaudio cpuonly faiss-cpu=1.7.4 mkl=2021 blas=1.0=mkl -c pytorch
+conda install pyg -c pyg
+conda install pandas
+conda install matplotlib
+conda install seaborn
+'''

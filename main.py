@@ -12,7 +12,7 @@ import pandas as pd
 def main(args):
     datasets = ['WBC','ANNT', 'THYR', 'MUSK', 'MAMO', 'ECOLI', 'VERT', 'WINE', 'BREAST', 'PIMA', 'GLASS']
     datasets = ['WBC', 'GLASS', 'THYR']
-    datasets = ['VERT']
+    datasets = ['WBC']
     for dataset_arg in datasets:
         columns = ['method', 'seed', 'k', 'epoch', 'train_test', 'tp', 'tn', 'fp', 'fn']
         df = pd.DataFrame([], columns=columns)

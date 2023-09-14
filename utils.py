@@ -69,10 +69,60 @@ def generate_negative_samples(x, sample_type, proportion, epsilon):
     return neg_x.astype('float32'), neg_y.astype('float32')
 
 
+def build_chain_org(dist, idx, i, chain_length, k):
+	# oryginal code extracted to method, so it can be compared / tested
+    neighbor_chain = idx[i][0:chain_length]
+    chain_distances = [dist[i][0]]
+    used = [i]
+    next_idx = idx[i][0]
+    for iii in range(chain_length-1):
+        ctr = 0
+        while True:
+            if ctr >= k:
+                break
+            found = idx[next_idx][ctr]
+            if found in used or found not in neighbor_chain:
+                ctr += 1
+                continue
+            chain_distances.append(dist[next_idx][ctr])
+            used.append(found)
+            next_idx = idx[found][0]
+            break
+    return chain_distances, used
+    
+    
+def build_chain_alt(dist, idx, i, chain_length):
+    neighbor_chain = set(idx[i][0:chain_length])
+    chain_distances = []
+    used = [i]
+    next_idx = i
+    for _ in range(chain_length):
+        for found, found_dist in zip(idx[next_idx], dist[next_idx]):
+            if found in used or found not in neighbor_chain or found < 0:
+                continue
+            chain_distances.append(found_dist)
+            used.append(found)
+            next_idx = found
+            break
+        else:
+            # can't build long enough chain (with used number of nearest neighbours - full graph always allows to build chain)
+            break
+
+    return chain_distances, used
+
+
+def calc_chain_value(chain_distances):
+    chain_value = 0
+    for c in range(len(chain_distances)):
+        chain_value += (len(chain_distances)-c) / len(chain_distances) * chain_distances[c]
+    chain_value /= len(chain_distances)
+    return chain_value
+    
+
 ################################### GRAPH FUNCTIONS ###############################################     
 # find the k nearest neighbours of all x points out of the neighbour candidates
 def find_neighbors(x, y, neighbor_mask, k):
-    
+
     # nearest neighbour object
     index = faiss.IndexFlatL2(x.shape[-1])
     # add nearest neighbour candidates
@@ -81,42 +131,37 @@ def find_neighbors(x, y, neighbor_mask, k):
     # distances and idx of neighbour points for the neighbour candidates (k+1 as the first one will be the point itself)
     dist_train, idx_train = index.search(x[neighbor_mask==1], k = k+1)
     # remove 1st nearest neighbours to remove self loops
-    dist_train, idx_train = dist_train[:,1:], idx_train[:,1:]
+
+    # dist_train, idx_train = dist_train[:,1:], idx_train[:,1:]
+    # above line does not work when there are duplicate points in input data: self match can be @ idx > 0
+    # 
+    # sadly below code is not very readable - maybe there are better ways or even plain python would do
+    # first lets get positions of self matches
+    # (which may not be zero and in worse case (>k duplicates) could even be missing - causing problems for simpler approaches)
+    self_positions_to_remove = np.argmax(idx_train == np.arange(idx_train.shape[0]).reshape(-1, 1), axis=1)
+    idx_train[np.arange(len(self_positions_to_remove)), self_positions_to_remove] = -2  # mark positions to remove
+    non_self_matches = idx_train != -2  # mask to use
+    idx_train = idx_train[non_self_matches].reshape((-1, k))
+    dist_train = dist_train[non_self_matches].reshape((-1, k))
+    
+
     # distances and idx of neighbour points for the non-neighbour candidates
     dist_test, idx_test = index.search(x[neighbor_mask==0], k = k)
     #concat
     dist = np.vstack((dist_train, dist_test))
     idx = np.vstack((idx_train, idx_test))
 
+
     dist2 = dist.copy()
-    for i in range(len(idx)):
+    from tqdm import tqdm  # optional prograss bar (since this part takes a while)
+    for i in tqdm(range(len(idx))):
         # if i % int(len(idx)/100) == 0:
         #     print(str(int((i+1)/len(idx)*100)) + '%')
         for ii in range(len(idx[i])):
             chain_length = ii + 1
-            neighbor_chain = idx[i][0:chain_length]
-            chain_distances = [dist[i][0]]
-            used = [i]
-            next_idx = idx[i][0]
-            for iii in range(chain_length-1):
-                ctr = 0
-                while True:
-                    if ctr >= k:
-                        break
-                    found = idx[next_idx][ctr]
-                    if found in used or found not in neighbor_chain:
-                        ctr += 1
-                        continue
-                    chain_distances.append(dist[next_idx][ctr])
-                    used.append(found)
-                    next_idx = idx[found][0]
-                    break
+            chain_distances, _ = build_chain_alt(dist, idx, i, chain_length)
+            dist2[i][ii] = calc_chain_value(chain_distances)
 
-            chain_value = 0
-            for c in range(len(chain_distances)):
-                chain_value += (len(chain_distances)-c) / len(chain_distances) * chain_distances[c]
-            chain_value /= len(chain_distances)
-            dist2[i][ii] = chain_value
 
     return idx, dist, dist2
 
