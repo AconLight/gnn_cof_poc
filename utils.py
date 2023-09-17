@@ -111,6 +111,44 @@ def build_chain_alt(dist, idx, i, chain_length):
     return chain_distances, used
 
 
+def pairwise_distnces_squared(x):
+    # maybe there are better implementations
+    x2 = np.einsum('ij,ij->i', x, x)
+    return np.abs(x2[:, np.newaxis] + x2[np.newaxis, :] - 2 * x @ x.T)
+
+    # probably more preciese
+    # import sklearn.metrics.pairwise
+    # return np.square(sklearn.metrics.pairwise_distances(x))
+
+
+def build_chain_new(pts_all, idx, i, chain_length):
+    # we dont use kNN distances here.
+    # we use starting point kNN neighbours indices and calculate all pairwise distances
+    # (because of that, its performance depends on problem dimentionality)
+
+    neighbor_chain = [i] + idx[i][0:chain_length].tolist()
+
+    pts = pts_all[neighbor_chain]
+
+    pairwise_distnces_for_neighbours = pairwise_distnces_squared(pts)
+    
+    marker = np.inf  # way to block item from selection
+    np.fill_diagonal(pairwise_distnces_for_neighbours, marker)
+
+    next_idx = 0  # his local position (in pairwise_distnces_for_neighbours)
+    used = [neighbor_chain[next_idx]]  # his global position
+    chain_distances = []
+    for _ in range(len(neighbor_chain)-1):
+        pairwise_distnces_for_neighbours[:,next_idx] = marker
+        found = np.argmin(pairwise_distnces_for_neighbours[next_idx])
+        chain_distances.append(pairwise_distnces_for_neighbours[next_idx][found])
+        used.append(neighbor_chain[found])
+        next_idx = found
+
+    # assert set(used) == set(neighbor_chain)  # we always find expected length chains
+    return chain_distances, used
+    
+
 def calc_chain_value(chain_distances):
     chain_value = 0
     for c in range(len(chain_distances)):
@@ -150,6 +188,7 @@ def find_neighbors(x, y, neighbor_mask, k):
     #concat
     dist = np.vstack((dist_train, dist_test))
     idx = np.vstack((idx_train, idx_test))
+    pts_all = np.vstack((x[neighbor_mask==1], x[neighbor_mask==0]))  # all points by index (needed for new approach)
 
 
     dist2 = dist.copy()
@@ -159,7 +198,8 @@ def find_neighbors(x, y, neighbor_mask, k):
         #     print(str(int((i+1)/len(idx)*100)) + '%')
         for ii in range(len(idx[i])):
             chain_length = ii + 1
-            chain_distances, _ = build_chain_alt(dist, idx, i, chain_length)
+            # chain_distances, _ = build_chain_alt(dist, idx, i, chain_length)
+            chain_distances, _ = build_chain_new(pts_all, idx, i, chain_length)
             dist2[i][ii] = calc_chain_value(chain_distances)
 
 
