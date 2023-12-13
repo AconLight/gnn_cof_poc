@@ -12,13 +12,13 @@ import pandas as pd
 def main(args):
     datasets = ['WBC','ANNT', 'THYR', 'MUSK', 'MAMO', 'ECOLI', 'VERT', 'WINE', 'BREAST', 'PIMA', 'GLASS']
     datasets = ['WBC', 'GLASS', 'THYR']
-    datasets = ['WBC']
+    datasets = ['THYR']
     for dataset_arg in datasets:
         columns = ['method', 'seed', 'k', 'epoch', 'train_test', 'tp', 'tn', 'fp', 'fn']
-        df = pd.DataFrame([], columns=columns)
+        results_df = pd.DataFrame([], columns=columns)
         datas = []
         max_k = 20
-        for seed in [0, 1, 2, 3, 4]:#range(1):
+        for seed in [0]:#, 1, 2, 3, 4]:#range(1):
             # print("Running trial with random seed = %d" %seed)
             # load dataset (without negative samples)
             train_x, train_y, val_x, val_y, test_x, test_y = utils.load_dataset(dataset_arg, seed)
@@ -62,8 +62,8 @@ def main(args):
                         per_data_train_scores.append(new_train_score)
                         per_data_all_scores.append(new_all_score)
                         scores[-1].append(new_score)
-                        df.loc[len(df)] = [mode, seed, k, var.n_epochs*test_out_idx+1, 'train', tps[test_out_idx], tns[test_out_idx], fps[test_out_idx], fns[test_out_idx]]
-                        df.loc[len(df)] = [mode, seed, k, var.n_epochs*test_out_idx+1, 'test', test_tps[test_out_idx], test_tns[test_out_idx], test_fps[test_out_idx], test_fns[test_out_idx]]
+                        results_df.loc[len(results_df)] = [mode, seed, k, var.n_epochs*test_out_idx+1, 'train', tps[test_out_idx], tns[test_out_idx], fps[test_out_idx], fns[test_out_idx]]
+                        results_df.loc[len(results_df)] = [mode, seed, k, var.n_epochs*test_out_idx+1, 'test', test_tps[test_out_idx], test_tns[test_out_idx], test_fps[test_out_idx], test_fns[test_out_idx]]
 
                         if new_score > score:
                             best_idx = test_out_idx
@@ -72,8 +72,8 @@ def main(args):
 
                     best_idxs.append(best_idx)
                     ep_x = range(1, len(per_data_scores)+1)
-                    plt.plot(ep_x, per_data_scores, 'r--', ep_x, per_data_train_scores, 'g--')
-                    plt.show()
+                    # plt.plot(ep_x, per_data_scores, 'r--', ep_x, per_data_train_scores, 'g--')
+                    # plt.show()
 
                 mediane = statistics.mean(best_idxs)
                 print('chosen idx: ' + str(int(mediane)))
@@ -94,9 +94,12 @@ def main(args):
                     d3.append(scr)
                 print('Mode: %s \t k: %d \t Score: %.4f' %(mode, k, scr))
 
-        df.to_csv('results/' + str(dataset_arg) + '.csv')
-        plt.plot(ks1, d1, 'r--', ks2, d2, 'b--', ks3, d3, 'g--')
-        plt.show()
+        results_df.to_csv('results/' + str(dataset_arg) + '.csv')
+        # plt.plot(ks1, d1, 'r--', ks2, d2, 'b--', ks3, d3, 'g--')
+        # plt.show()
+        del d1, d2, d3, ks1, ks2, ks3
+        del datas, train_x, train_y, val_x, val_y, test_x, test_y
+
 
 if __name__ == "__main__":
 
