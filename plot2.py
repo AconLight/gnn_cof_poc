@@ -3,7 +3,7 @@ from seaborn import lineplot
 from matplotlib import pyplot as plt
 # load the dataset
 columns = ['method', 'seed', 'k', 'epoch', 'train_test', 'tp', 'tn', 'fp', 'fn']
-dataset_arg = 'WBC'
+dataset_arg = 'THYR'
 path = 'results/' + str(dataset_arg) + '.csv'
 dataset = read_csv(path, header=0)
 
