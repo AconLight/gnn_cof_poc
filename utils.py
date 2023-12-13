@@ -38,9 +38,9 @@ def negative_samples(train_x, train_y, val_x, val_y, test_x, test_y, k, sample_t
                                np.zeros(len(test_y))))
     
     # find k nearest neighbours (idx) and their distances (dist) to each points in x within neighbour_mask==1
-    idx, dist, dist2 = find_neighbors(x, y, neighbor_mask, k)
+    idx, dist, dist_cof, dist_vectors = find_neighbors(x, y, neighbor_mask, k)
 
-    return x.astype('float32'), y.astype('float32'), neighbor_mask.astype('float32'), train_mask.astype('float32'), val_mask.astype('float32'), test_mask.astype('float32'), dist, dist2, idx
+    return x.astype('float32'), y.astype('float32'), neighbor_mask.astype('float32'), train_mask.astype('float32'), val_mask.astype('float32'), test_mask.astype('float32'), dist, dist_cof, dist_vectors, idx
 
 # loading negative samples
 def generate_negative_samples(x, sample_type, proportion, epsilon):
@@ -190,6 +190,16 @@ def find_neighbors(x, y, neighbor_mask, k):
     idx = np.vstack((idx_train, idx_test))
     pts_all = np.vstack((x[neighbor_mask==1], x[neighbor_mask==0]))  # all points by index (needed for new approach)
 
+    dist_vectors_shape = [idx.shape[0], idx.shape[1], x.shape[1]]
+    dist_vectors = np.zeros(shape=dist_vectors_shape)
+
+
+    for i in range(idx.shape[0]):
+        for n_idx in range(idx.shape[1]):
+            a = x[i]
+            b = x[idx[i, n_idx]]
+            c = a - b
+            dist_vectors[i, n_idx] = c
 
     dist2 = dist.copy()
     from tqdm import tqdm  # optional prograss bar (since this part takes a while)
@@ -203,18 +213,21 @@ def find_neighbors(x, y, neighbor_mask, k):
             dist2[i][ii] = calc_chain_value(chain_distances)
 
 
-    return idx, dist, dist2
+    return idx, dist, dist2, dist_vectors
 
-def cut_data(dist, dist2, idx, k):
-    return dist[:, 0:k], dist2[:, 0:k], idx[:, 0:k]
+def cut_data(dist, dist2, dist3,  idx, k):
+    return dist[:, 0:k], dist2[:, 0:k], dist3[:, 0:k], idx[:, 0:k]
 
 
 
 # create graph object out of x, y, distances and indices of neighbours
-def build_graph(x, y, idx, dist, dist2):
+def build_graph(x, y, idx, distances_stack, is_vector=False):
     
     # array like [0,0,0,0,0,1,1,1,1,1,...,n,n,n,n,n] for k = 5 (i.e. edges sources)
-    idx_source = np.repeat(np.arange(len(x)),dist.shape[-1]).astype('int32')
+    if not is_vector:
+        idx_source = np.repeat(np.arange(len(x)),distances_stack[0].shape[-1]).astype('int32')
+    else:
+        idx_source = np.repeat(np.arange(len(x)),distances_stack[0].shape[-2]).astype('int32')
     idx_source = np.expand_dims(idx_source,axis=0)
 
     # edge targets, i.e. the nearest k neighbours of point 0, 1,..., n
@@ -224,25 +237,31 @@ def build_graph(x, y, idx, dist, dist2):
     #stack source and target indices
     idx = np.vstack((idx_source, idx_target))
 
-    # edge weights
-    attr1 = dist.flatten()
-    attr1 = np.sqrt(attr1)
-    # attr1 = np.expand_dims(attr1, axis=1)
+    attributes = []
+    for distances in distances_stack:
+        # edge weights
 
-    attr2 = dist2.flatten()
-    attr2 = np.sqrt(attr2)
-    # attr2 = np.expand_dims(attr2, axis=1)
+        if not is_vector:
+            attr = distances.flatten()
+            attr = np.sqrt(attr)
+        else:
+            attr = distances.reshape((distances.shape[1]*distances.shape[0], distances.shape[2]))
+            attr = np.expand_dims(attr, axis=0)
 
-    attr = np.dstack((attr1, attr2))
+        attributes.append(attr)
+
+    attributes = np.dstack(attributes)
+
+    attributes = attributes[0]
 
     # into tensors
     x = torch.tensor(x, dtype = torch.float32)
     y = torch.tensor(y,dtype = torch.float32)
     idx = torch.tensor(idx, dtype = torch.long)
-    attr = torch.tensor(attr, dtype = torch.float32)
+    attributes = torch.tensor(attributes, dtype = torch.float32)
 
     #build PyTorch geometric Data object
-    data = Data(x = x, edge_index = idx, edge_attr = attr, y = y)
+    data = Data(x = x, edge_index = idx, edge_attr = attributes, y = y)
     
     return data
 
@@ -327,7 +346,7 @@ def load_dataset(dataset,seed):
         test_x = np.concatenate((anomaly_data,normal_data[test_idx]))
         test_y  = np.concatenate((np.ones(len(anomaly_data)),np.zeros(len(test_idx))))  
         
-    elif dataset in ['OPTDIGITS', 'PENDIGITS','SHUTTLE', 'WBC','ANNT', 'THYR', 'MUSK', 'MAMO', 'ECOLI', 'VERT', 'WINE', 'BREAST', 'PIMA', 'GLASS']:
+    elif dataset in ['SAT', 'PEN', 'OPT', 'SPEECH', 'MNIST', 'ARR', 'OPTDIGITS', 'PENDIGITS','SHUTTLE', 'WBC','ANNT', 'THYR', 'MUSK', 'MAMO', 'ECOLI', 'VERT', 'WINE', 'BREAST', 'PIMA', 'GLASS']:
         if dataset == 'SHUTTLE':
             data = loadmat("data/SHUTTLE/shuttle.mat")
         elif dataset == 'OPTDIGITS':
@@ -342,6 +361,18 @@ def load_dataset(dataset,seed):
             data = loadmat('data/THYROID/thyroid.mat')
         elif dataset == 'MUSK':
             data = loadmat('data/MUSK/musk.mat')
+        elif dataset == 'ARR':
+            data = loadmat('data/ARR/arrhythmia.mat')
+        elif dataset == 'MNIST':
+            data = loadmat('data/MNIST/mnist.mat')
+        elif dataset == 'SPEECH':
+            data = loadmat('data/SPEECH/speech.mat')
+        elif dataset == 'OPT':
+            data = loadmat('data/OPT/optdigits.mat')
+        elif dataset == 'PEN':
+            data = loadmat('data/PEN/pendigits.mat')
+        elif dataset == 'SAT':
+            data = loadmat('data/SAT/satellite.mat')
         elif dataset == 'MAMO':
             data = loadmat('data/MAMO/mamo.mat')
         elif dataset == 'ECOLI':
@@ -408,3 +439,22 @@ def load_dataset(dataset,seed):
     train_x, train_y, val_x, val_y, test_x, test_y = split_data(seed, all_train_x = train_x, all_train_y = train_y, all_test_x = test_x, all_test_y = test_y)
 
     return train_x, train_y, val_x, val_y, test_x, test_y       
+
+
+def unit_vector(vector):
+    """ Returns the unit vector of the vector.  """
+    return vector / np.linalg.norm(vector)
+
+def angle_between(v1, v2):
+    """ Returns the angle in radians between vectors 'v1' and 'v2'::
+
+            >>> angle_between((1, 0, 0), (0, 1, 0))
+            1.5707963267948966
+            >>> angle_between((1, 0, 0), (1, 0, 0))
+            0.0
+            >>> angle_between((1, 0, 0), (-1, 0, 0))
+            3.141592653589793
+    """
+    v1_u = unit_vector(v1)
+    v2_u = unit_vector(v2)
+    return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
