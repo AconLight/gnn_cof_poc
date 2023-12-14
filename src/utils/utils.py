@@ -4,7 +4,6 @@ from sklearn.preprocessing import MinMaxScaler
 import os
 import torch
 from torch_geometric.data import Data
-import variables as var
 from scipy.io import loadmat
 import faiss
 
@@ -38,9 +37,9 @@ def negative_samples(train_x, train_y, val_x, val_y, test_x, test_y, k, sample_t
                                np.zeros(len(test_y))))
     
     # find k nearest neighbours (idx) and their distances (dist) to each points in x within neighbour_mask==1
-    idx, dist, dist2 = find_neighbors(x, y, neighbor_mask, k)
+    idx, dist, dist_cof, dist_vectors = find_neighbors(x, y, neighbor_mask, k)
 
-    return x.astype('float32'), y.astype('float32'), neighbor_mask.astype('float32'), train_mask.astype('float32'), val_mask.astype('float32'), test_mask.astype('float32'), dist, dist2, idx
+    return x.astype('float32'), y.astype('float32'), neighbor_mask.astype('float32'), train_mask.astype('float32'), val_mask.astype('float32'), test_mask.astype('float32'), dist, dist_cof, dist_vectors, idx
 
 # loading negative samples
 def generate_negative_samples(x, sample_type, proportion, epsilon):
@@ -69,10 +68,98 @@ def generate_negative_samples(x, sample_type, proportion, epsilon):
     return neg_x.astype('float32'), neg_y.astype('float32')
 
 
+def build_chain_org(dist, idx, i, chain_length, k):
+	# oryginal code extracted to method, so it can be compared / tested
+    neighbor_chain = idx[i][0:chain_length]
+    chain_distances = [dist[i][0]]
+    used = [i]
+    next_idx = idx[i][0]
+    for iii in range(chain_length-1):
+        ctr = 0
+        while True:
+            if ctr >= k:
+                break
+            found = idx[next_idx][ctr]
+            if found in used or found not in neighbor_chain:
+                ctr += 1
+                continue
+            chain_distances.append(dist[next_idx][ctr])
+            used.append(found)
+            next_idx = idx[found][0]
+            break
+    return chain_distances, used
+    
+    
+def build_chain_alt(dist, idx, i, chain_length):
+    neighbor_chain = set(idx[i][0:chain_length])
+    chain_distances = []
+    used = [i]
+    next_idx = i
+    for _ in range(chain_length):
+        for found, found_dist in zip(idx[next_idx], dist[next_idx]):
+            if found in used or found not in neighbor_chain or found < 0:
+                continue
+            chain_distances.append(found_dist)
+            used.append(found)
+            next_idx = found
+            break
+        else:
+            # can't build long enough chain (with used number of nearest neighbours - full graph always allows to build chain)
+            break
+
+    return chain_distances, used
+
+
+def pairwise_distnces_squared(x):
+    # maybe there are better implementations
+    x2 = np.einsum('ij,ij->i', x, x)
+    return np.abs(x2[:, np.newaxis] + x2[np.newaxis, :] - 2 * x @ x.T)
+
+    # probably more preciese
+    # import sklearn.metrics.pairwise
+    # return np.square(sklearn.metrics.pairwise_distances(x))
+
+
+def build_chain_new(pts_all, idx, i, chain_length):
+    # we dont use kNN distances here.
+    # we use starting point kNN neighbours indices and calculate all pairwise distances
+    # (because of that, its performance depends on problem dimentionality)
+
+    neighbor_chain = [i] + idx[i][0:chain_length].tolist()
+
+    pts = pts_all[neighbor_chain]
+
+    pairwise_distnces_for_neighbours = pairwise_distnces_squared(pts)
+    
+    marker = np.inf  # way to block item from selection
+    np.fill_diagonal(pairwise_distnces_for_neighbours, marker)
+
+    next_idx = 0  # his local position (in pairwise_distnces_for_neighbours)
+    used = [neighbor_chain[next_idx]]  # his global position
+    chain_distances = []
+    for _ in range(len(neighbor_chain)-1):
+        pairwise_distnces_for_neighbours[:,next_idx] = marker
+        found = np.argmin(pairwise_distnces_for_neighbours[next_idx])
+        chain_distances.append(pairwise_distnces_for_neighbours[next_idx][found])
+        used.append(neighbor_chain[found])
+        next_idx = found
+
+    # assert set(used) == set(neighbor_chain)  # we always find expected length chains
+    return chain_distances, used
+    
+
+def calc_chain_value(chain_distances):
+    chain_value = 0
+    for c in range(len(chain_distances)):
+        chain_value += (len(chain_distances)-c) / len(chain_distances) * chain_distances[c]
+    chain_value /= len(chain_distances)
+    return chain_value
+    
+
 ################################### GRAPH FUNCTIONS ###############################################     
 # find the k nearest neighbours of all x points out of the neighbour candidates
 def find_neighbors(x, y, neighbor_mask, k):
-    
+
     # nearest neighbour object
     index = faiss.IndexFlatL2(x.shape[-1])
     # add nearest neighbour candidates
@@ -81,55 +168,65 @@ def find_neighbors(x, y, neighbor_mask, k):
     # distances and idx of neighbour points for the neighbour candidates (k+1 as the first one will be the point itself)
     dist_train, idx_train = index.search(x[neighbor_mask==1], k = k+1)
     # remove 1st nearest neighbours to remove self loops
-    dist_train, idx_train = dist_train[:,1:], idx_train[:,1:]
+
+    # dist_train, idx_train = dist_train[:,1:], idx_train[:,1:]
+    # above line does not work when there are duplicate points in input data: self match can be @ idx > 0
+    # 
+    # sadly below code is not very readable - maybe there are better ways or even plain python would do
+    # first lets get positions of self matches
+    # (which may not be zero and in worse case (>k duplicates) could even be missing - causing problems for simpler approaches)
+    self_positions_to_remove = np.argmax(idx_train == np.arange(idx_train.shape[0]).reshape(-1, 1), axis=1)
+    idx_train[np.arange(len(self_positions_to_remove)), self_positions_to_remove] = -2  # mark positions to remove
+    non_self_matches = idx_train != -2  # mask to use
+    idx_train = idx_train[non_self_matches].reshape((-1, k))
+    dist_train = dist_train[non_self_matches].reshape((-1, k))
+    
+
     # distances and idx of neighbour points for the non-neighbour candidates
     dist_test, idx_test = index.search(x[neighbor_mask==0], k = k)
     #concat
     dist = np.vstack((dist_train, dist_test))
     idx = np.vstack((idx_train, idx_test))
+    pts_all = np.vstack((x[neighbor_mask==1], x[neighbor_mask==0]))  # all points by index (needed for new approach)
+
+    dist_vectors_shape = [idx.shape[0], idx.shape[1], x.shape[1]]
+    dist_vectors = np.zeros(shape=dist_vectors_shape)
+
+
+    for i in range(idx.shape[0]):
+        for n_idx in range(idx.shape[1]):
+            a = x[i]
+            b = x[idx[i, n_idx]]
+            c = a - b
+            dist_vectors[i, n_idx] = c
 
     dist2 = dist.copy()
-    for i in range(len(idx)):
+    from tqdm import tqdm  # optional prograss bar (since this part takes a while)
+    for i in tqdm(range(len(idx))):
         # if i % int(len(idx)/100) == 0:
         #     print(str(int((i+1)/len(idx)*100)) + '%')
         for ii in range(len(idx[i])):
             chain_length = ii + 1
-            neighbor_chain = idx[i][0:chain_length]
-            chain_distances = [dist[i][0]]
-            used = [i]
-            next_idx = idx[i][0]
-            for iii in range(chain_length-1):
-                ctr = 0
-                while True:
-                    if ctr >= k:
-                        break
-                    found = idx[next_idx][ctr]
-                    if found in used or found not in neighbor_chain:
-                        ctr += 1
-                        continue
-                    chain_distances.append(dist[next_idx][ctr])
-                    used.append(found)
-                    next_idx = idx[found][0]
-                    break
+            # chain_distances, _ = build_chain_alt(dist, idx, i, chain_length)
+            chain_distances, _ = build_chain_new(pts_all, idx, i, chain_length)
+            dist2[i][ii] = calc_chain_value(chain_distances)
 
-            chain_value = 0
-            for c in range(len(chain_distances)):
-                chain_value += (len(chain_distances)-c) / len(chain_distances) * chain_distances[c]
-            chain_value /= len(chain_distances)
-            dist2[i][ii] = chain_value
 
-    return idx, dist, dist2
+    return idx, dist, dist2, dist_vectors
 
-def cut_data(dist, dist2, idx, k):
-    return dist[:, 0:k], dist2[:, 0:k], idx[:, 0:k]
+def cut_data(dist, dist2, dist3,  idx, k):
+    return dist[:, 0:k], dist2[:, 0:k], dist3[:, 0:k], idx[:, 0:k]
 
 
 
 # create graph object out of x, y, distances and indices of neighbours
-def build_graph(x, y, idx, dist, dist2):
+def build_graph(x, y, idx, distances_stack, is_vector=False):
     
     # array like [0,0,0,0,0,1,1,1,1,1,...,n,n,n,n,n] for k = 5 (i.e. edges sources)
-    idx_source = np.repeat(np.arange(len(x)),dist.shape[-1]).astype('int32')
+    if not is_vector:
+        idx_source = np.repeat(np.arange(len(x)),distances_stack[0].shape[-1]).astype('int32')
+    else:
+        idx_source = np.repeat(np.arange(len(x)),distances_stack[0].shape[-2]).astype('int32')
     idx_source = np.expand_dims(idx_source,axis=0)
 
     # edge targets, i.e. the nearest k neighbours of point 0, 1,..., n
@@ -139,25 +236,31 @@ def build_graph(x, y, idx, dist, dist2):
     #stack source and target indices
     idx = np.vstack((idx_source, idx_target))
 
-    # edge weights
-    attr1 = dist.flatten()
-    attr1 = np.sqrt(attr1)
-    # attr1 = np.expand_dims(attr1, axis=1)
+    attributes = []
+    for distances in distances_stack:
+        # edge weights
 
-    attr2 = dist2.flatten()
-    attr2 = np.sqrt(attr2)
-    # attr2 = np.expand_dims(attr2, axis=1)
+        if not is_vector:
+            attr = distances.flatten()
+            attr = np.sqrt(attr)
+        else:
+            attr = distances.reshape((distances.shape[1]*distances.shape[0], distances.shape[2]))
+            attr = np.expand_dims(attr, axis=0)
 
-    attr = np.dstack((attr1, attr2))
+        attributes.append(attr)
+
+    attributes = np.dstack(attributes)
+
+    attributes = attributes[0]
 
     # into tensors
     x = torch.tensor(x, dtype = torch.float32)
     y = torch.tensor(y,dtype = torch.float32)
     idx = torch.tensor(idx, dtype = torch.long)
-    attr = torch.tensor(attr, dtype = torch.float32)
+    attributes = torch.tensor(attributes, dtype = torch.float32)
 
     #build PyTorch geometric Data object
-    data = Data(x = x, edge_index = idx, edge_attr = attr, y = y)
+    data = Data(x = x, edge_index = idx, edge_attr = attributes, y = y)
     
     return data
 
@@ -242,35 +345,47 @@ def load_dataset(dataset,seed):
         test_x = np.concatenate((anomaly_data,normal_data[test_idx]))
         test_y  = np.concatenate((np.ones(len(anomaly_data)),np.zeros(len(test_idx))))  
         
-    elif dataset in ['OPTDIGITS', 'PENDIGITS','SHUTTLE', 'WBC','ANNT', 'THYR', 'MUSK', 'MAMO', 'ECOLI', 'VERT', 'WINE', 'BREAST', 'PIMA', 'GLASS']:
+    elif dataset in ['SAT', 'PEN', 'OPT', 'SPEECH', 'MNIST', 'ARR', 'OPTDIGITS', 'PENDIGITS','SHUTTLE', 'WBC','ANNT', 'THYR', 'MUSK', 'MAMO', 'ECOLI', 'VERT', 'WINE', 'BREAST', 'PIMA', 'GLASS']:
         if dataset == 'SHUTTLE':
-            data = loadmat("data/SHUTTLE/shuttle.mat")
+            data = loadmat("./data/SHUTTLE/shuttle.mat")
         elif dataset == 'OPTDIGITS':
             data = loadmat("data/optdigits/optdigits.mat")
         elif dataset == 'PENDIGITS':
             data = loadmat('data/PENDIGITS/pendigits.mat')
         elif dataset == 'WBC':
-            data = loadmat('data/WBC/wbc.mat')
+            data = loadmat('./data/WBC/wbc.mat')
         elif dataset == 'ANNT':
-            data = loadmat('data/THYROID/annthyroid.mat')
+            data = loadmat('./data/THYROID/annthyroid.mat')
         elif dataset == 'THYR':
-            data = loadmat('data/THYROID/thyroid.mat')
+            data = loadmat('./data/THYROID/thyroid.mat')
         elif dataset == 'MUSK':
-            data = loadmat('data/MUSK/musk.mat')
+            data = loadmat('./data/MUSK/musk.mat')
+        elif dataset == 'ARR':
+            data = loadmat('./data/ARR/arrhythmia.mat')
+        elif dataset == 'MNIST':
+            data = loadmat('./data/MNIST/mnist.mat')
+        elif dataset == 'SPEECH':
+            data = loadmat('./data/SPEECH/speech.mat')
+        elif dataset == 'OPT':
+            data = loadmat('./data/OPT/optdigits.mat')
+        elif dataset == 'PEN':
+            data = loadmat('./data/PEN/pendigits.mat')
+        elif dataset == 'SAT':
+            data = loadmat('./data/SAT/satellite.mat')
         elif dataset == 'MAMO':
-            data = loadmat('data/MAMO/mamo.mat')
+            data = loadmat('./data/MAMO/mamo.mat')
         elif dataset == 'ECOLI':
-            data = loadmat('data/MAT/ecoli.mat')
+            data = loadmat('./data/MAT/ecoli.mat')
         elif dataset == 'WINE':
-            data = loadmat('data/MAT/wine.mat')
+            data = loadmat('./data/MAT/wine.mat')
         elif dataset == 'VERT':
-            data = loadmat('data/MAT/vertebral.mat')
+            data = loadmat('./data/MAT/vertebral.mat')
         elif dataset == 'BREAST':
-            data = loadmat('data/MAT/breastw.mat')
+            data = loadmat('./data/MAT/breastw.mat')
         elif dataset == 'PIMA':
-            data = loadmat('data/MAT/pima.mat')
+            data = loadmat('./data/MAT/pima.mat')
         elif dataset == 'GLASS':
-            data = loadmat('data/MAT/glass.mat')
+            data = loadmat('./data/MAT/glass.mat')
         label = data['y'].astype('float32').squeeze()
         data = data['X'].astype('float32')
         normal_data= data[label == 0]
@@ -286,9 +401,9 @@ def load_dataset(dataset,seed):
         
     elif dataset in ['THYROID','HRSS']:
         if dataset == 'THYROID':
-            data = pd.read_csv('data/THYROID/annthyroid_21feat_normalised.csv').to_numpy()
+            data = pd.read_csv('./data/THYROID/annthyroid_21feat_normalised.csv').to_numpy()
         if dataset == 'HRSS':
-            data = pd.read_csv('data/HRSS/HRSS.csv').to_numpy()
+            data = pd.read_csv('./data/HRSS/HRSS.csv').to_numpy()
         label = data[:,-1].astype('float32').squeeze()
         data = data[:,:-1].astype('float32')
         normal_data= data[label == 0]
@@ -323,3 +438,22 @@ def load_dataset(dataset,seed):
     train_x, train_y, val_x, val_y, test_x, test_y = split_data(seed, all_train_x = train_x, all_train_y = train_y, all_test_x = test_x, all_test_y = test_y)
 
     return train_x, train_y, val_x, val_y, test_x, test_y       
+
+
+def unit_vector(vector):
+    """ Returns the unit vector of the vector.  """
+    return vector / np.linalg.norm(vector)
+
+def angle_between(v1, v2):
+    """ Returns the angle in radians between vectors 'v1' and 'v2'::
+
+            >>> angle_between((1, 0, 0), (0, 1, 0))
+            1.5707963267948966
+            >>> angle_between((1, 0, 0), (1, 0, 0))
+            0.0
+            >>> angle_between((1, 0, 0), (-1, 0, 0))
+            3.141592653589793
+    """
+    v1_u = unit_vector(v1)
+    v2_u = unit_vector(v2)
+    return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))

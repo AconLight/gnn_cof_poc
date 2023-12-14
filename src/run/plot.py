@@ -1,4 +1,4 @@
-from ploters import plot2
+from src.plot.ploters import plot2
 
 # dataset_arg = 'THYR'
 # plot2(dataset_arg, 3, 8, 'original', 'only angles')
