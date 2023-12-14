@@ -4,7 +4,7 @@ from torch_geometric.nn import MessagePassing
 
 
 class GNN1(MessagePassing):
-    def __init__(self ,k, input_size):
+    def __init__(self ,k, input_size, ):
         super(GNN1, self).__init__(flow="target_to_source")
         self.k = k
         self.input_size = input_size

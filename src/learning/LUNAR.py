@@ -8,7 +8,8 @@ import torch.optim as optim
 from sklearn.metrics import precision_score, confusion_matrix
 
 from src.gnn.gnn import GNN
-from src.gnn.gnn_angle import GNNAngle, GNNAngleFit
+from src.gnn.gnn_angle import GNNAngle
+from src.gnn.gnn_og_angle import GNNAngleOg
 from src.utils import variables as var
 
 
@@ -35,8 +36,8 @@ def run(dataset,seed,k,samples,train_new_model, data, train_mask, val_mask, test
         net = GNN(k, input_size).to(var.device)
     elif gnn_name == 'angle':
         net = GNNAngle(k, input_size).to(var.device)
-    elif gnn_name == 'angle fit':
-        net = GNNAngleFit(k, input_size).to(var.device)
+    elif gnn_name == 'og and angle':
+        net = GNNAngleOg(k, input_size).to(var.device)
     outs = []
     all_outs = []
     train_outs = []

@@ -4,21 +4,24 @@ from src.learning import LUNAR
 import argparse
 import statistics
 import pandas as pd
+import warnings
+
 
 def main(args):
-    datasets = ['WBC','ANNT', 'THYR', 'MUSK', 'MAMO', 'VERT', 'WINE', 'BREAST', 'PIMA', 'GLASS', 'MNIST', 'SPEECH', 'SAT', 'PEN', 'OPT', 'SHUTTLE']
+    warnings.filterwarnings("ignore")
+    datasets = ['HRSS', 'MI-V', 'MI-F', 'WBC','ANNT', 'THYR', 'MUSK', 'MAMO', 'VERT', 'WINE', 'BREAST', 'PIMA', 'GLASS', 'MNIST', 'SPEECH', 'SAT', 'PEN', 'OPT', 'SHUTTLE']
     # datasets = ['THYR', 'WBC']
     # datasets = ['MUSK', 'GLASS', 'THYR', 'WBC']
     # datasets = ['ANNT', 'MAMO', 'VERT']
     # datasets = ['SHUTTLE', 'SAT', 'PEN', 'OPT', 'THYR'] # those are in LUNAR paper
-    datasets = ['WBC']
+    datasets = ['THYR']
     # datasets = ['WBC', 'MUSK', 'ARR', 'SPEECH', 'OPT', 'MNIST'] # high dimensions
     for dataset_arg in datasets:
         columns = ['method', 'seed', 'k', 'epoch', 'train_test', 'tp', 'tn', 'fp', 'fn']
         results_df = pd.DataFrame([], columns=columns)
         datas = []
         start_k = 3
-        max_k = 7
+        max_k = 3
         gnn_name = 'normal'
         for seed in [0]:#, 1, 2, 3, 4]:#range(1):
             # print("Running trial with random seed = %d" %seed)
@@ -37,7 +40,9 @@ def main(args):
         # 7358
         # for mode in ['original and cof', 'only vectors']:#, 'only cof']:
         # for mode in ['only angle fit']:#, 'only cof']:
-        for mode in ['original', 'only angles']:#, 'only cof']:
+        # for mode in ['original', 'only angles']:
+        for mode in ['original', 'original angle']:
+        # for mode in ['original angle', 'original']:
         # for mode in ['only angles']:#, 'only cof']:
         # for mode in ['only vectors']:#, 'only cof']:
             for k in range(start_k, max_k+1):
@@ -70,15 +75,7 @@ def main(args):
                     if mode == 'original angle':
                         my_data = utils.build_graph(x, y, cut_idx, [cut_distances_vectors], True)
                         input_size = int(k*(k-1) / 2) + k
-                        gnn_name = 'original angle'
-                    if mode == 'only angle fit':
-                        my_data = utils.build_graph(x, y, cut_idx, [cut_distances_vectors], True)
-                        input_size = int(k / 2)
-                        gnn_name = 'angle fit'
-                    if mode == 'original and vectors':
-                        pass
-                        # my_data = utils.build_graph(x, y, cut_idx, [cut_distances, cut_distances_vectors])
-                        # input_size = k*2
+                        gnn_name = 'og and angle'
 
                     start = time.time()
                     test_scores, train_scores, all_scores, test_tps, test_tns, test_fps, test_fns, tps, tns, fps, fns = LUNAR.run(dataset_arg, seed, k, args.samples, args.train_new_model, my_data, train_mask, val_mask, test_mask, input_size, gnn_name)

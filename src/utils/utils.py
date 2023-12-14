@@ -299,11 +299,13 @@ def load_dataset(dataset,seed):
         df = pd.read_csv("data/MI/experiment_01.csv")
         for i in ['02','03','11','12','13','14','15','17','18']:
             data = pd.read_csv("data/MI/experiment_%s.csv" %i)
-            df = df.append(data, ignore_index = True)
+            # df = df.append(data, ignore_index = True)
+            df = pd.concat([df, pd.DataFrame(data)], ignore_index=True)
         normal_idx = np.ones(len(df))
         for i in ['06','08','09','10']:
             data = pd.read_csv("data/MI/experiment_%s.csv" %i)
-            df = df.append(data, ignore_index = True)        
+            # df = df.append(data, ignore_index = True)
+            df = pd.concat([df, pd.DataFrame(data)], ignore_index=True)
             normal_idx = np.append(normal_idx,np.zeros(len(data)))
         machining_process_one_hot = pd.get_dummies(df['Machining_Process'])
         df = pd.concat([df.drop(['Machining_Process'],axis=1),machining_process_one_hot],axis=1)
