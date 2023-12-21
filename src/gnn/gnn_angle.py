@@ -13,7 +13,7 @@ class GNN1Angle(MessagePassing):
         self.input_aggr_test = None
         self.k = k
         self.input_size = input_size
-        self.hidden_size = 128#256
+        self.hidden_size = 256
         self.network = nn.Sequential(
             nn.Linear(input_size,self.hidden_size),
             nn.Tanh(),
@@ -36,10 +36,6 @@ class GNN1Angle(MessagePassing):
         return edge_attr
 
     def aggregate(self, inputs, index, k, network):
-        # concatenate all k messages
-        # self.input_aggr = inputs.reshape(-1,self.input_size)
-        # my_input_aggr = inputs.reshape(-1,self.input_size)
-        # print('aggregate')
         if self.is_train:
             if self.input_aggr_train is not None:
                 out = self.network(self.input_aggr_train)
@@ -53,7 +49,7 @@ class GNN1Angle(MessagePassing):
                 out = self.network(self.input_aggr_test)
                 return out
 
-            self.input_aggr_train = calc_pair_angles(inputs, self.k)
+            self.input_aggr_test = calc_pair_angles(inputs, self.k)
             out = self.network(self.input_aggr_test)
             return out
 

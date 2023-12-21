@@ -2,12 +2,12 @@ import torch
 import torch.nn as nn
 from torch_geometric.nn import MessagePassing
 
-from src.utils.angle import calc_pair_angles, calc_pair_angles_and_dist
+from src.utils.angle import calc_pair_angles, calc_pair_angles_and_dist, calc_tripple_and_dist
 
 
-class GNN1AngleOg(MessagePassing):
+class GNN1TrippleOg(MessagePassing):
     def __init__(self,k, input_size):
-        super(GNN1AngleOg, self).__init__(flow="target_to_source")
+        super(GNN1TrippleOg, self).__init__(flow="target_to_source")
         self.is_train = True
         self.input_aggr_train = None
         self.input_aggr_test = None
@@ -42,7 +42,7 @@ class GNN1AngleOg(MessagePassing):
                 out = self.network(self.input_aggr_train)
                 return out
 
-            self.input_aggr_train = calc_pair_angles_and_dist(inputs, self.k)
+            self.input_aggr_train = calc_tripple_and_dist(inputs, self.k)
             out = self.network(self.input_aggr_train)
             return out
         else:
@@ -50,16 +50,16 @@ class GNN1AngleOg(MessagePassing):
                 out = self.network(self.input_aggr_test)
                 return out
 
-            self.input_aggr_test = calc_pair_angles_and_dist(inputs, self.k)
+            self.input_aggr_test = calc_tripple_and_dist(inputs, self.k)
             out = self.network(self.input_aggr_test)
             return out
 
 # GNN
-class GNNAngleOg(torch.nn.Module):
+class GNNTrippleOg(torch.nn.Module):
     def __init__(self, k, input_size):
-        super(GNNAngleOg, self).__init__()
+        super(GNNTrippleOg, self).__init__()
         self.k = k
-        self.L1 = GNN1AngleOg(self.k, input_size)
+        self.L1 = GNN1TrippleOg(self.k, input_size)
     def forward(self,data):
         self.edge_attr = data.edge_attr
         self.edge_index = data.edge_index

@@ -4,24 +4,14 @@ from torch_geometric.nn import MessagePassing
 
 
 class GNN1(MessagePassing):
-    def __init__(self ,k, input_size, ):
+    def __init__(self):
         super(GNN1, self).__init__(flow="target_to_source")
-        self.k = k
-        self.input_size = input_size
-        self.hidden_size = 256
         self.network = nn.Sequential(
-            nn.Linear(input_size ,self.hidden_size),
-            nn.Tanh(),
-            nn.Linear(self.hidden_size ,self.hidden_size),
-            nn.Tanh(),
-            nn.Linear(self.hidden_size ,self.hidden_size),
-            nn.Tanh(),
-            nn.Linear(self.hidden_size ,1),
+            nn.Linear(1, 1),
             nn.Sigmoid()
         )
 
     def forward(self, x, edge_index, edge_attr):
-        self.network = self.network.to(dtype = torch.float32)
         out = self.propagate(edge_index = edge_index, x=x, edge_attr=edge_attr, k = self.k, network=self.network)
         return out
 
@@ -49,3 +39,16 @@ class GNN(torch.nn.Module):
         out = self.L1(self.x, self.edge_index, self.edge_attr)
         out = torch.squeeze(out ,1)
         return out
+
+def log_gnn():
+
+    data = data.to(var.device)
+    torch.manual_seed(seed)
+    if gnn_name == 'normal':
+        net = GNN(k, input_size).to(var.device)
+    elif gnn_name == 'angle':
+        net = GNNAngle(k, input_size).to(var.device)
+    elif gnn_name == 'og and angle':
+        net = GNNAngleOg(k, input_size).to(var.device)
+    elif gnn_name == 'original tripple':
+        net = GNNTrippleOg(k, input_size).to(var.device)

@@ -9,14 +9,16 @@ from sklearn.metrics import precision_score, confusion_matrix
 
 from src.gnn.gnn import GNN
 from src.gnn.gnn_angle import GNNAngle
+from src.gnn.gnn_layer import GNNLayer
 from src.gnn.gnn_og_angle import GNNAngleOg
+from src.gnn.gnn_og_tripple import GNNTrippleOg
 from src.utils import variables as var
 
 
 # Message passing scheme
 
 
-def run(dataset,seed,k,samples,train_new_model, data, train_mask, val_mask, test_mask, input_size, gnn_name = 'normal'):
+def run(dataset,seed,k,data, train_mask, val_mask, test_mask, net):
     # print('train_new_model: ' + str(train_new_model))
     # loss function
     criterion = nn.MSELoss(reduction = 'none')    
@@ -32,12 +34,6 @@ def run(dataset,seed,k,samples,train_new_model, data, train_mask, val_mask, test
 
     data = data.to(var.device)
     torch.manual_seed(seed)
-    if gnn_name == 'normal':
-        net = GNN(k, input_size).to(var.device)
-    elif gnn_name == 'angle':
-        net = GNNAngle(k, input_size).to(var.device)
-    elif gnn_name == 'og and angle':
-        net = GNNAngleOg(k, input_size).to(var.device)
     outs = []
     all_outs = []
     train_outs = []
@@ -58,7 +54,7 @@ def run(dataset,seed,k,samples,train_new_model, data, train_mask, val_mask, test
 
         # training
         for epoch in range(var.n_epochs):
-            # print('epoch: ' + str(epoch))
+            #print('epoch: ' + str(epoch))
             net.train()
             net.L1.is_train = True
             optimizer.zero_grad()
