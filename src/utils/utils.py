@@ -13,58 +13,76 @@ import faiss
 ########################################### NEGATIVE SAMPLE FUNCTIONS################################################
 def negative_samples(normal_x, normal_y, anom_x, anom_y, k, sample_type, proportion, epsilon):
 
-    # train_test_ratio = 0.5
-    #
-    # train_ones = np.ones(int(train_test_ratio*len(normal_x) + 0.5))
-    # train_zeros = np.zeros(len(normal_x) - len(train_ones))
-    #
-    # test_zeros = np.zeros(int(train_test_ratio*len(normal_x) + 0.5))
-    # test_ones = np.ones(len(normal_x) - len(test_zeros))
-
     test_idx = np.random.choice(np.arange(0, len(normal_x)), len(anom_x), replace=False)
     train_idx = np.setdiff1d(np.arange(0, len(normal_x)), test_idx)
-
     train_x = normal_x[train_idx]
     train_y = normal_y[train_idx]
+    test_x = np.concatenate((normal_x[test_idx], anom_x))
+    test_y = np.concatenate((normal_y[test_idx], anom_y))
 
-    test_x = normal_x[test_idx]
-    test_y = normal_y[test_idx]
 
-    # train_mask_for_neg = np.hstack((train_ones, train_zeros))
-
+    train_x, train_y, val_x, val_y, test_x, test_y = split_data(1, all_train_x=train_x, all_train_y=train_y,
+                                                                all_test_x=test_x, all_test_y=test_y)
 
     # training set negative samples
     neg_train_x, neg_train_y = generate_negative_samples(train_x, sample_type, proportion, epsilon)
     # validation set negative samples
-    # neg_val_x, neg_val_y = generate_negative_samples(val_x, sample_type, proportion, epsilon)
-    
+    neg_val_x, neg_val_y = generate_negative_samples(val_x, sample_type, proportion, epsilon)
+
     # concat data
-    x = np.vstack((train_x, test_x, neg_train_x, anom_x))
-    y = np.hstack((train_y, test_y, neg_train_y, anom_y))
-
-
+    x = np.vstack((train_x, neg_train_x, val_x, neg_val_x, test_x))
+    y = np.hstack((train_y, neg_train_y, val_y, neg_val_y, test_y))
 
     # all training set
-    train_mask = np.hstack((np.ones(len(train_x)), np.zeros(len(test_x)), np.ones(len(neg_train_x)),
-                            np.zeros(len(anom_x))))
+    train_mask = np.hstack((np.ones(len(train_x)), np.ones(len(neg_train_x)),
+                            np.zeros(len(val_x)), np.zeros(len(neg_val_x)),
+                            np.zeros(len(test_x))))
+    # all validation set
+    val_mask = np.hstack((np.zeros(len(train_x)), np.zeros(len(neg_train_x)),
+                          np.ones(len(val_x)), np.ones(len(neg_val_x)),
+                          np.zeros(len(test_x))))
     # all test set
-    test_mask = np.hstack((np.zeros(len(train_x)), np.ones(len(test_x)), np.zeros(len(neg_train_x)),
-                           np.ones(len(anom_x))))
-
-    # all test set
-    test_mask = np.hstack((np.ones(len(normal_x)), np.zeros(len(neg_train_x)),
-                           np.ones(len(anom_x))))
+    test_mask = np.hstack((np.zeros(len(train_x)), np.zeros(len(neg_train_x)),
+                           np.zeros(len(val_x)), np.zeros(len(neg_val_x)),
+                           np.ones(len(test_x))))
     # normal training points
-    neighbor_mask = np.hstack((np.ones(len(normal_x)), np.ones(len(neg_train_x)),
-                               np.zeros(len(anom_x))))
+    neighbor_mask = np.hstack((np.ones(len(train_x)), np.zeros(len(neg_train_x)),
+                               np.zeros(len(val_y)), np.zeros(len(neg_val_x)),
+                               np.zeros(len(test_y))))
     
     # find k nearest neighbours (idx) and their distances (dist) to each points in x within neighbour_mask==1
     idx, dist, dist_cof, dist_vectors = find_neighbors(x, y, neighbor_mask, k)
 
     return x.astype('float32'), y.astype('float32'), neighbor_mask.astype('float32'), train_mask.astype('float32'), test_mask.astype('float32'), dist, dist_cof, dist_vectors, idx
 
+
 # loading negative samples
 def generate_negative_samples(x, sample_type, proportion, epsilon):
+    n_samples = int(proportion * (len(x)))
+    n_dim = x.shape[-1]
+
+    # M
+    randmat = np.random.rand(n_samples, n_dim) < 0.3
+    # uniform samples
+    rand_unif = (epsilon * (1 - 2 * np.random.rand(n_samples, n_dim)))
+    #  subspace perturbation samples
+    rand_sub = np.tile(x, (proportion, 1)) + randmat * (epsilon * np.random.randn(n_samples, n_dim))
+
+    if sample_type == 'UNIFORM':
+        neg_x = rand_unif
+    if sample_type == 'SUBSPACE':
+        neg_x = rand_sub
+    if sample_type == 'MIXED':
+        # randomly sample from uniform and gaussian negative samples
+        neg_x = np.concatenate((rand_unif, rand_sub), 0)
+        neg_x = neg_x[np.random.choice(np.arange(len(neg_x)), size=n_samples)]
+
+    neg_y = np.ones(len(neg_x))
+
+    return neg_x.astype('float32'), neg_y.astype('float32')
+
+# loading negative samples
+def generate_negative_samples_new(x, sample_type, proportion, epsilon):
     MIXEDHIGHDIM_FACTOR = 10
     if sample_type == 'MIXEDHIGHDIM':
         proportion *= MIXEDHIGHDIM_FACTOR
@@ -77,32 +95,33 @@ def generate_negative_samples(x, sample_type, proportion, epsilon):
     # uniform samples
     rand_unif = (epsilon* (1-2*np.random.rand(n_samples,n_dim)))
     #  subspace perturbation samples
-    rand_sub = np.tile(x, (proportion,1)) + randmat*(epsilon*np.random.randn(n_samples,n_dim))
+    # rand_sub = np.tile(x, (1,1)) + randmat*(epsilon*np.random.randn(n_samples,n_dim))
     
     if sample_type == 'UNIFORM':
         neg_x = rand_unif
-    if sample_type == 'SUBSPACE':
-        neg_x = rand_sub
+    # if sample_type == 'SUBSPACE':
+    #     neg_x = rand_sub
     if sample_type == 'MIXED':
         # randomly sample from uniform and gaussian negative samples
-        neg_x = np.concatenate((rand_unif, rand_sub),0)
-        neg_x = neg_x[np.random.choice(np.arange(len(neg_x)), size = n_samples)]
-    if sample_type == 'MIXEDHIGHDIM':
-        # randomly sample from uniform and gaussian negative samples
-        neg_x = np.concatenate((rand_unif, rand_sub),0)
-        neg_x = neg_x[np.random.choice(np.arange(len(neg_x)), size = n_samples)]
-        abod_model = ABOD(contamination=0.2, method='fast', n_neighbors=3)
-        abod_model.fit(x)
-
-        abod_model = ABOD(contamination=0.2, method='fast', n_neighbors=3)
-        abod_model.fit(np.concatenate((neg_x, x), 0))
-        neg_x_scores = abod_model.decision_scores_
-        neg_x_dim = [p for _, p in sorted(zip(neg_x_scores[:len(neg_x)], neg_x), key=lambda p: p[0], reverse=True)][:int(n_samples/MIXEDHIGHDIM_FACTOR*0.7)]
-        neg_x_dim = np.array(neg_x_dim)
-        both = np.concatenate((neg_x, neg_x_dim),0)
-        both = both[np.random.choice(np.arange(len(neg_x)), size=int(n_samples/MIXEDHIGHDIM_FACTOR))]
-        neg_x = np.array(both)
-        print('neg_x size', len(neg_x))
+        # neg_x = np.concatenate((rand_unif, rand_sub),0)
+        # neg_x = neg_x[np.random.choice(np.arange(len(neg_x)), size = n_samples)]
+        neg_x = rand_unif
+    # if sample_type == 'MIXEDHIGHDIM':
+    #     # randomly sample from uniform and gaussian negative samples
+    #     neg_x = np.concatenate((rand_unif, rand_sub),0)
+    #     neg_x = neg_x[np.random.choice(np.arange(len(neg_x)), size = n_samples)]
+    #     abod_model = ABOD(contamination=0.2, method='fast', n_neighbors=3)
+    #     abod_model.fit(x)
+    #
+    #     abod_model = ABOD(contamination=0.2, method='fast', n_neighbors=3)
+    #     abod_model.fit(np.concatenate((neg_x, x), 0))
+    #     neg_x_scores = abod_model.decision_scores_
+    #     neg_x_dim = [p for _, p in sorted(zip(neg_x_scores[:len(neg_x)], neg_x), key=lambda p: p[0], reverse=True)][:int(n_samples/MIXEDHIGHDIM_FACTOR*0.7)]
+    #     neg_x_dim = np.array(neg_x_dim)
+    #     both = np.concatenate((neg_x, neg_x_dim),0)
+    #     both = both[np.random.choice(np.arange(len(neg_x)), size=int(n_samples/MIXEDHIGHDIM_FACTOR))]
+    #     neg_x = np.array(both)
+    #     print('neg_x size', len(neg_x))
 
     neg_y = np.ones(len(neg_x))
     
