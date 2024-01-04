@@ -1,19 +1,42 @@
+import numpy as np
 from pandas import read_csv
 from matplotlib import pyplot as plt
 
 
 
 def plot2(dataset_args, start_k = None, max_k = None):
+    colors = ['r', 'g', 'b', 'c', 'm', 'y', 'limegreen', 'navy']
+    def annot_max(x, y, x_label, y_label, i, n, ax=None):
+        xmax = x[np.argmax(y)]
+        ymax = y.max()
+        text = "{}={:}, {}={:.3f}".format(x_label, xmax, y_label, ymax)
+        if not ax:
+            ax = plt.gca()
+        bbox_props = dict(boxstyle="square,pad=0.3", fc="w", ec="k", lw=0.72, )
+        arrowprops = dict(arrowstyle="->", connectionstyle="angle,angleA=0,angleB=60")
+        kw = dict(xycoords='data', textcoords="axes fraction",
+                  arrowprops=arrowprops, bbox=bbox_props, ha="right", va="top")
+        ax.annotate(text, xy=(xmax, ymax), xytext=(0.94, 1 + 0.15*n - 0.15*i), color=colors[i], **kw)
+
     def draw(labels, datas, metric, title):
         for i in range(len(labels)):
-            plt.plot(datas[i]['epoch'], datas[i][metric], label=labels[i])
-        plt.grid(True)
-        plt.ylim(0, 1)
+            plt.plot(datas[i]['epoch'], datas[i][metric], colors[i], label=labels[i])
+        for i in range(len(labels)):
+            annot_max(datas[i]['epoch'], datas[i][metric], 'epoch', metric, i, len(labels))
+
+        plt.grid(which="both")
+        plt.minorticks_on()
+        plt.ylim(-0.02, 1.02)
         plt.legend()
         plt.xlabel('epoch')
         plt.ylabel(metric)
-        plt.title(title)
-        plt.savefig('results/plots/' + str(dataset_arg) + '_' + str(title) + '_' + metric + '.png')
+        plt.title(title, pad=50+5*len(labels), loc='left')
+        plt.subplots_adjust(top=0.80-0.05*len(labels), bottom=0.1)
+        # plt.text(0.5, 1.08, title,
+        #          horizontalalignment='center',
+        #          fontsize=20,
+        #          transform=plt.transAxes)
+        plt.savefig('results/plots/' + str(title.replace("\n", "_").replace(" ", "_").replace(":", "_")) + '_' + metric + '.png')
         plt.close()
     def draw2(data_train, label1, data_test, label2, metric, title):
         plt.plot(data_train['epoch'], data_train[metric], label=label1)
@@ -74,20 +97,17 @@ def plot2(dataset_args, start_k = None, max_k = None):
                     best_k_per_method[method] = k
 
 
-                draw(['train', 'test'], [data_train_k_seeded_per_method[method], data_test_k_seeded_per_method[method]], 'accuracy', method + ', k = ' + str(k))
+                draw(['train', 'test'], [data_train_k_seeded_per_method[method], data_test_k_seeded_per_method[method]], 'accuracy', f"one method: {method}\ndataset: {dataset_arg}\nk: {k}")
                 # draw(data_train_k_seeded_per_method[method], 'train', data_test_k_seeded_per_method[method], 'test', 'accuracy', method + ', k = ' + str(k))
             # draw(data_test_new_k_seeded, method_name_2 + ' test', data_test_og_k_seeded, method_name_1 + ' test', 'accuracy',
             #      method_name_2 + ' vs ' + method_name_1 + ', k = ' + str(k))
-            draw(methods, list(data_test_k_seeded_per_method.values()), 'accuracy', 'method comparison, k = ' + str(k))
+            draw(methods, list(data_test_k_seeded_per_method.values()), 'accuracy', f"method comparison\ndataset: {dataset_arg}\nk: {k}")
 
-
-        # print(dataset_arg)
-        # print()
-        # print('k = ' + str(og_best_k))
-        # print(og_best_stats)
-        # print()
-        # print('k = ' + str(new_best_k))
-        # print(new_best_stats)
+        for method in methods:
+            print()
+            print(f"best for {method}")
+            print('k = ' + str(best_k_per_method[method]))
+            print(best_stats_per_method[method])
 
 
 

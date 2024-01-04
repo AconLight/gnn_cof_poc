@@ -32,6 +32,34 @@ def calc_pair_angles_and_dist(inputs, k):
 
     return torch.from_numpy(np.array(message)).to(torch.float32)
 
+def calc_angles_var_and_dist(inputs, k):
+    message = []
+    splited = np.split(inputs, int(inputs.shape[0] / k))
+    for neighbors in splited:
+        pairs = [(a, b) for idx, a in enumerate(neighbors) for b in neighbors[idx + 1:]]
+        message_neighbors = []
+        angles = []
+        for pair in pairs:
+            angle = utils.angle_between(pair[0], pair[1])
+            angles.append(angle)
+        for neighbor in neighbors:
+            message_neighbors.append(np.linalg.norm(neighbor.numpy()))
+        message_neighbors.append(np.var(angles))
+        message.append(message_neighbors)
+
+    return torch.from_numpy(np.array(message)).to(torch.float32)
+
+def calc_dist(inputs, k):
+    message = []
+    splited = np.split(inputs, int(inputs.shape[0] / k))
+    for neighbors in splited:
+        message_neighbors = []
+        for neighbor in neighbors:
+            message_neighbors.append(np.linalg.norm(neighbor.numpy()))
+        message.append(message_neighbors)
+
+    return torch.from_numpy(np.array(message)).to(torch.float32)
+
 def calc_tripple_and_dist(inputs, k):
     message = []
     splited = np.split(inputs, int(inputs.shape[0] / k))

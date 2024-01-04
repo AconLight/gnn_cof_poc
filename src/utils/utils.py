@@ -1,49 +1,74 @@
+import random
+
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 import os
+from pyod.models.abod import ABOD
 import torch
 from torch_geometric.data import Data
 from scipy.io import loadmat
 import faiss
 
 ########################################### NEGATIVE SAMPLE FUNCTIONS################################################
-def negative_samples(train_x, train_y, val_x, val_y, test_x, test_y, k, sample_type, proportion, epsilon):
-    
+def negative_samples(normal_x, normal_y, anom_x, anom_y, k, sample_type, proportion, epsilon):
+
+    # train_test_ratio = 0.5
+    #
+    # train_ones = np.ones(int(train_test_ratio*len(normal_x) + 0.5))
+    # train_zeros = np.zeros(len(normal_x) - len(train_ones))
+    #
+    # test_zeros = np.zeros(int(train_test_ratio*len(normal_x) + 0.5))
+    # test_ones = np.ones(len(normal_x) - len(test_zeros))
+
+    test_idx = np.random.choice(np.arange(0, len(normal_x)), len(anom_x), replace=False)
+    train_idx = np.setdiff1d(np.arange(0, len(normal_x)), test_idx)
+
+    train_x = normal_x[train_idx]
+    train_y = normal_y[train_idx]
+
+    test_x = normal_x[test_idx]
+    test_y = normal_y[test_idx]
+
+    # train_mask_for_neg = np.hstack((train_ones, train_zeros))
+
+
     # training set negative samples
     neg_train_x, neg_train_y = generate_negative_samples(train_x, sample_type, proportion, epsilon)
     # validation set negative samples
-    neg_val_x, neg_val_y = generate_negative_samples(val_x, sample_type, proportion, epsilon)
+    # neg_val_x, neg_val_y = generate_negative_samples(val_x, sample_type, proportion, epsilon)
     
     # concat data
-    x = np.vstack((train_x,neg_train_x,val_x,neg_val_x,test_x))
-    y = np.hstack((train_y,neg_train_y,val_y,neg_val_y,test_y))
+    x = np.vstack((train_x, test_x, neg_train_x, anom_x))
+    y = np.hstack((train_y, test_y, neg_train_y, anom_y))
+
+
 
     # all training set
-    train_mask = np.hstack((np.ones(len(train_x)),np.ones(len(neg_train_x)),
-                            np.zeros(len(val_x)),np.zeros(len(neg_val_x)),
-                            np.zeros(len(test_x))))
-    # all validation set
-    val_mask = np.hstack((np.zeros(len(train_x)),np.zeros(len(neg_train_x)),
-                          np.ones(len(val_x)),np.ones(len(neg_val_x)),
-                          np.zeros(len(test_x))))
+    train_mask = np.hstack((np.ones(len(train_x)), np.zeros(len(test_x)), np.ones(len(neg_train_x)),
+                            np.zeros(len(anom_x))))
     # all test set
-    test_mask = np.hstack((np.zeros(len(train_x)),np.zeros(len(neg_train_x)),
-                           np.zeros(len(val_x)),np.zeros(len(neg_val_x)),
-                           np.ones(len(test_x))))
+    test_mask = np.hstack((np.zeros(len(train_x)), np.ones(len(test_x)), np.zeros(len(neg_train_x)),
+                           np.ones(len(anom_x))))
+
+    # all test set
+    test_mask = np.hstack((np.ones(len(normal_x)), np.zeros(len(neg_train_x)),
+                           np.ones(len(anom_x))))
     # normal training points
-    neighbor_mask = np.hstack((np.ones(len(train_x)), np.zeros(len(neg_train_x)), 
-                               np.zeros(len(val_y)), np.zeros(len(neg_val_x)),
-                               np.zeros(len(test_y))))
+    neighbor_mask = np.hstack((np.ones(len(normal_x)), np.ones(len(neg_train_x)),
+                               np.zeros(len(anom_x))))
     
     # find k nearest neighbours (idx) and their distances (dist) to each points in x within neighbour_mask==1
     idx, dist, dist_cof, dist_vectors = find_neighbors(x, y, neighbor_mask, k)
 
-    return x.astype('float32'), y.astype('float32'), neighbor_mask.astype('float32'), train_mask.astype('float32'), val_mask.astype('float32'), test_mask.astype('float32'), dist, dist_cof, dist_vectors, idx
+    return x.astype('float32'), y.astype('float32'), neighbor_mask.astype('float32'), train_mask.astype('float32'), test_mask.astype('float32'), dist, dist_cof, dist_vectors, idx
 
 # loading negative samples
 def generate_negative_samples(x, sample_type, proportion, epsilon):
-    
+    MIXEDHIGHDIM_FACTOR = 10
+    if sample_type == 'MIXEDHIGHDIM':
+        proportion *= MIXEDHIGHDIM_FACTOR
+
     n_samples = int(proportion*(len(x)))
     n_dim = x.shape[-1]
         
@@ -62,6 +87,22 @@ def generate_negative_samples(x, sample_type, proportion, epsilon):
         # randomly sample from uniform and gaussian negative samples
         neg_x = np.concatenate((rand_unif, rand_sub),0)
         neg_x = neg_x[np.random.choice(np.arange(len(neg_x)), size = n_samples)]
+    if sample_type == 'MIXEDHIGHDIM':
+        # randomly sample from uniform and gaussian negative samples
+        neg_x = np.concatenate((rand_unif, rand_sub),0)
+        neg_x = neg_x[np.random.choice(np.arange(len(neg_x)), size = n_samples)]
+        abod_model = ABOD(contamination=0.2, method='fast', n_neighbors=3)
+        abod_model.fit(x)
+
+        abod_model = ABOD(contamination=0.2, method='fast', n_neighbors=3)
+        abod_model.fit(np.concatenate((neg_x, x), 0))
+        neg_x_scores = abod_model.decision_scores_
+        neg_x_dim = [p for _, p in sorted(zip(neg_x_scores[:len(neg_x)], neg_x), key=lambda p: p[0], reverse=True)][:int(n_samples/MIXEDHIGHDIM_FACTOR*0.7)]
+        neg_x_dim = np.array(neg_x_dim)
+        both = np.concatenate((neg_x, neg_x_dim),0)
+        both = both[np.random.choice(np.arange(len(neg_x)), size=int(n_samples/MIXEDHIGHDIM_FACTOR))]
+        neg_x = np.array(both)
+        print('neg_x size', len(neg_x))
 
     neg_y = np.ones(len(neg_x))
     
@@ -201,15 +242,15 @@ def find_neighbors(x, y, neighbor_mask, k):
             dist_vectors[i, n_idx] = c
 
     dist2 = dist.copy()
-    from tqdm import tqdm  # optional prograss bar (since this part takes a while)
-    for i in tqdm(range(len(idx))):
-        # if i % int(len(idx)/100) == 0:
-        #     print(str(int((i+1)/len(idx)*100)) + '%')
-        for ii in range(len(idx[i])):
-            chain_length = ii + 1
-            # chain_distances, _ = build_chain_alt(dist, idx, i, chain_length)
-            chain_distances, _ = build_chain_new(pts_all, idx, i, chain_length)
-            dist2[i][ii] = calc_chain_value(chain_distances)
+    # from tqdm import tqdm  # optional prograss bar (since this part takes a while)
+    # for i in tqdm(range(len(idx))):
+    #     # if i % int(len(idx)/100) == 0:
+    #     #     print(str(int((i+1)/len(idx)*100)) + '%')
+    #     for ii in range(len(idx[i])):
+    #         chain_length = ii + 1
+    #         # chain_distances, _ = build_chain_alt(dist, idx, i, chain_length)
+    #         chain_distances, _ = build_chain_new(pts_all, idx, i, chain_length)
+    #         dist2[i][ii] = calc_chain_value(chain_distances)
 
 
     return idx, dist, dist2, dist_vectors
@@ -293,7 +334,7 @@ def split_data(seed, all_train_x, all_train_y, all_test_x, all_test_y):
 
 #load data
 def load_dataset(dataset,seed):     
-    np.random.seed(seed)    
+    np.random.seed(seed*100)
     
     if dataset == 'MI-V':
         df = pd.read_csv("data/MI/experiment_01.csv")
@@ -400,7 +441,17 @@ def load_dataset(dataset,seed):
         train_y = normal_label[train_idx]
         test_x = np.concatenate((normal_data[test_idx],anom_data))
         test_y = np.concatenate((normal_label[test_idx],anom_label))
-        
+
+        train_x = normal_data
+        train_y = normal_label
+        test_x = np.concatenate((normal_data, anom_data))
+        test_y = np.concatenate((normal_label, anom_label))
+        test_x = normal_data
+        test_y = normal_label
+
+        train_x, train_y = unison_shuffled_copies(train_x, train_y)
+        test_x, test_y = unison_shuffled_copies(test_x, test_y)
+
     elif dataset in ['THYROID','HRSS']:
         if dataset == 'THYROID':
             data = pd.read_csv('./data/THYROID/annthyroid_21feat_normalised.csv').to_numpy()
@@ -437,11 +488,17 @@ def load_dataset(dataset,seed):
         test_x = np.concatenate((test_x,anom_data[test_idx]))
         test_y = np.concatenate((test_y, anom_label[test_idx])) 
                 
-    train_x, train_y, val_x, val_y, test_x, test_y = split_data(seed, all_train_x = train_x, all_train_y = train_y, all_test_x = test_x, all_test_y = test_y)
+    train_x2, train_y2, val_x, val_y, test_x2, test_y2 = split_data(seed, all_train_x = train_x, all_train_y = train_y, all_test_x = test_x, all_test_y = test_y)
+    # train_x, train_y, val_x, val_y, test_x, test_y = split_data(seed, all_train_x = train_x, all_train_y = train_y, all_test_x = test_x, all_test_y = test_y)
 
-    return train_x, train_y, val_x, val_y, test_x, test_y       
+    # return train_x, train_y, test_x, test_y
+    return normal_data, normal_label, anom_data, anom_label
 
 
+def unison_shuffled_copies(a, b):
+    assert len(a) == len(b)
+    p = np.random.permutation(len(a))
+    return a[p], b[p]
 def unit_vector(vector):
     """ Returns the unit vector of the vector.  """
     return vector / np.linalg.norm(vector)

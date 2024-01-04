@@ -1,11 +1,13 @@
 # imports
 import os
+import time
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import precision_score, confusion_matrix
+from tqdm import tqdm
 
 from src.gnn.gnn import GNN
 from src.gnn.gnn_angle import GNNAngle
@@ -18,7 +20,7 @@ from src.utils import variables as var
 # Message passing scheme
 
 
-def run(dataset,seed,k,data, train_mask, val_mask, test_mask, net):
+def run(dataset,seed,k,datas, train_masks, test_masks, net):
     # print('train_new_model: ' + str(train_new_model))
     # loss function
     criterion = nn.MSELoss(reduction = 'none')    
@@ -32,7 +34,7 @@ def run(dataset,seed,k,data, train_mask, val_mask, test_mask, net):
     # data = utils.build_graph(x, y, idx, dist, dist2)
 
 
-    data = data.to(var.device)
+
     torch.manual_seed(seed)
     outs = []
     all_outs = []
@@ -47,8 +49,14 @@ def run(dataset,seed,k,data, train_mask, val_mask, test_mask, net):
     fps = []
     fns = []
 
+    print("training GNN...")
+    time.sleep(1)
+    for epoches_ctr in tqdm(var.all_epoches):
 
-    for epoches_ctr in var.all_epoches:
+        data = datas[epoches_ctr % len(datas)]
+        data = data.to(var.device)
+        train_mask = train_masks[epoches_ctr % len(train_masks)]
+        test_mask = test_masks[epoches_ctr % len(test_masks)]
 
         optimizer = optim.Adam(net.parameters(), lr = var.lr, weight_decay = var.wd)
 
@@ -78,10 +86,8 @@ def run(dataset,seed,k,data, train_mask, val_mask, test_mask, net):
         # all_outs.append(roc_auc_score(data.y[val_mask==1].cpu(),out[val_mask==1].cpu()))
         out21 = np.round(np.clip(out[test_mask==1].cpu().tolist(), 0, 1)).astype(bool)
         out22 = np.round(np.clip(out[train_mask==1].cpu().tolist(), 0, 1)).astype(bool)
-        out23 = np.round(np.clip(out[val_mask==1].cpu().tolist(), 0, 1)).astype(bool)
         outs.append(precision_score(data.y[test_mask==1].cpu().tolist(), out21))
         train_outs.append(precision_score(data.y[train_mask == 1].cpu().tolist(), out22))
-        all_outs.append(precision_score(data.y[val_mask==1].cpu().tolist(),out23))
 
         test_tn, test_fp, test_fn, test_tp = confusion_matrix(data.y[test_mask==1].cpu().tolist(), out21).ravel()
         tn, fp, fn, tp = confusion_matrix(data.y[train_mask == 1].cpu().tolist(), out22).ravel()
