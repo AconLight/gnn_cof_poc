@@ -1,5 +1,5 @@
 <h1>This repo contains source code used to generate results of "Extending LUNAR method with COF chaining distances" research paper.</h1>
-<p>link to the science paper: <a href="https://www.sciencedirect.com/science/article/pii/S1877050923015673"></a></p>
+<p>the paper has been published <a href="https://www.sciencedirect.com/science/article/pii/S1877050923015673">here</a></p>
 <p>the repository is currently used to carry out further research</p>
 
 <p>example of current results - angle based modification</p>
