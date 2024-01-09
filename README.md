@@ -6,6 +6,8 @@
 <h4>the repository is currently used to carry out further research</h4>
 <p>example of current results - angle based modification</p>
 <img width="442" alt="image" src="https://github.com/AconLight/gnn_cof_poc/assets/4647063/a7f015ca-e095-4559-995f-15e697b46bc2">
+<img width="439" alt="image" src="https://github.com/AconLight/gnn_cof_poc/assets/4647063/a14c4081-956c-43e2-a19a-a48dcf05b64b">
+
 
 
 
